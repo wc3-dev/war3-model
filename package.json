@@ -1,6 +1,6 @@
 {
   "name": "war3-model",
-  "version": "4.0.1",
+  "version": "4.0.1-moonwell.1",
   "description": "Warcraft 3 model parser, generator, convertor and previewer",
   "keywords": [
     "warcraft3",
@@ -26,7 +26,6 @@
   },
   "scripts": {
     "prepublishOnly": "npm run build-lib",
-    "prepare": "husky install",
     "dev": "vite",
     "build-lib": "vite build",
     "build-samples": "SAMPLES=1 vite build",
