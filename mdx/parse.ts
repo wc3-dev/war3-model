@@ -53,6 +53,15 @@ class State {
         return res;
     }
 
+    // The keyword `offset` bytes ahead, without moving past it; empty past the end.
+    public keywordAhead (offset: number): string {
+        const at = this.pos + offset;
+        if (at + 4 > this.length) {
+            return '';
+        }
+        return String.fromCharCode(this.uint[at], this.uint[at + 1], this.uint[at + 2], this.uint[at + 3]);
+    }
+
     public expectKeyword (keyword: string, errorText: string): void {
         const curKeyword = this.keyword();
         if (curKeyword !== keyword) {
@@ -459,7 +468,16 @@ function parseGeosets (model: Model, state: State, size: number) {
                         throw new Error('Incorrect geoset, multiple SkinWeights');
                     }
                     const len = state.int32();
-                    geoset.SkinWeights = state.uint8Array(len);
+                    // Version 1800 files store each bone and weight in two bytes; earlier ones in one. The geoset
+                    // goes on with one of these keywords, so it shows which.
+                    if (['UVAS', 'TANG', 'SKIN'].includes(state.keywordAhead(len * 2))) {
+                        geoset.SkinWeights = new Uint8Array(len);
+                        for (let i = 0; i < len; ++i) {
+                            geoset.SkinWeights[i] = Math.min(255, state.uint16());
+                        }
+                    } else {
+                        geoset.SkinWeights = state.uint8Array(len);
+                    }
                 } else if (keyword === 'UVAS') {
                     break;
                 }
@@ -836,7 +854,8 @@ function parseCameras (model: Model, state: State, size: number): void {
 
     while (state.pos < startPos + size) {
         const cameraStart = state.pos;
-        const cameraSize = state.int32();
+        // Version 1800 files put 3 in the size's fourth byte.
+        const cameraSize = state.int32() & 0xffffff;
 
         const camera: Camera = {} as Camera;
 
@@ -874,6 +893,11 @@ function parseCameras (model: Model, state: State, size: number): void {
     }
 }
 
+const LIGHT_TRACKS = ['KLAV', 'KLAC', 'KLAI', 'KLBC', 'KLBI', 'KLAS', 'KLAE'];
+function isLightTrack (keyword: string): boolean {
+    return LIGHT_TRACKS.includes(keyword);
+}
+
 function parseLights (model: Model, state: State, size: number): void {
     const startPos = state.pos;
 
@@ -886,6 +910,12 @@ function parseLights (model: Model, state: State, size: number): void {
         parseNode(model, light, state);
 
         light.LightType = state.int32();
+        // Version 1800 files have a number more before the attenuation and six after the ambient intensity, whose
+        // meaning is not known. The light goes on with a track or ends, which shows which.
+        const longer = !isLightTrack(state.keywordAhead(40)) && state.pos + 40 !== lightStart + lightSize;
+        if (longer) {
+            state.int32();
+        }
         light.AttenuationStart = state.float32();
         light.AttenuationEnd = state.float32();
 
@@ -904,6 +934,10 @@ function parseLights (model: Model, state: State, size: number): void {
         }
 
         light.AmbIntensity = state.float32();
+
+        if (longer) {
+            state.pos += 6 * 4;
+        }
 
         while (state.pos < lightStart + lightSize) {
             const keyword = state.keyword();
